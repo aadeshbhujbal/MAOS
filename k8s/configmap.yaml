@@ -1,0 +1,50 @@
+# ---------------------------------------------------------------------------
+# configmap.yaml — Non-secret environment configuration for MAOS
+#
+# Requirements: 14.5, TC-12, TC-13
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: maos-config
+  namespace: maos
+  labels:
+    app.kubernetes.io/part-of: maos
+data:
+  # Postgres DSN (secret password injected via secret ref)
+  MAOS_POSTGRES_HOST: "maos-pgbouncer.maos.svc.cluster.local"
+  MAOS_POSTGRES_PORT: "5432"
+  MAOS_POSTGRES_DB: "maos"
+  MAOS_POSTGRES_USER: "maos"
+
+  # Redis
+  MAOS_REDIS_URL: "redis://maos-redis.maos.svc.cluster.local:6379/0"
+
+  # Broker (Redis Streams for message bus and task queues)
+  MAOS_BROKER_URL: "redis://maos-redis.maos.svc.cluster.local:6379/1"
+
+  # LLM adapter defaults
+  MAOS_LLM_DEFAULT_PROVIDER: "anthropic"
+  MAOS_LLM_DEFAULT_MODEL: "claude-sonnet-4-20250514"
+
+  # Observability
+  MAOS_OTEL_EXPORTER_ENDPOINT: "http://otel-collector.observability.svc.cluster.local:4317"
+  MAOS_SENTRY_ENVIRONMENT: "production"
+
+  # Concurrency and budget controls (designed for ~500k users)
+  MAOS_GLOBAL_CONCURRENCY_LIMIT: "200"
+  MAOS_PER_TENANT_CONCURRENCY_LIMIT: "10"
+  MAOS_DEFAULT_TOKEN_BUDGET: "100000"
+  MAOS_RATE_LIMIT_PER_TENANT: "60"
+  MAOS_RATE_LIMIT_WINDOW_SECONDS: "60"
+
+  # Sandbox
+  MAOS_SANDBOX_RUNTIME: "gvisor"
+  MAOS_SANDBOX_CPU_LIMIT: "500m"
+  MAOS_SANDBOX_MEMORY_LIMIT: "256Mi"
+  MAOS_SANDBOX_WALL_CLOCK_SECONDS: "30"
+
+  # Retention
+  MAOS_WORKING_MEMORY_RETENTION_DAYS: "30"
+  MAOS_SEMANTIC_MEMORY_RETENTION_DAYS: "90"
+  MAOS_SHARED_CONTEXT_TTL_SECONDS: "86400"

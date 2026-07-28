@@ -1,0 +1,74 @@
+# ---------------------------------------------------------------------------
+# worker-hpa.yaml — KEDA ScaledObject for maos-worker
+#
+# Scales workers based on Redis Stream (broker) queue lag and CPU.
+# KEDA monitors the pending message count in the orchestration queue and
+# adds workers when lag grows — critical for handling bursty Task submissions
+# at the ~500,000 user scale.
+#
+# Requirements: 14.5, 14.6, TC-12
+# ---------------------------------------------------------------------------
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: maos-worker
+  namespace: maos
+  labels:
+    app.kubernetes.io/name: maos-worker
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: maos
+spec:
+  scaleTargetRef:
+    name: maos-worker
+  pollingInterval: 15
+  cooldownPeriod: 120
+  minReplicaCount: 2
+  maxReplicaCount: 20
+  fallback:
+    failureThreshold: 3
+    replicas: 4
+  advanced:
+    restoreToOriginalReplicaCount: false
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 30
+          policies:
+            - type: Pods
+              value: 4
+              periodSeconds: 60
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+            - type: Pods
+              value: 2
+              periodSeconds: 120
+  triggers:
+    # Scale on Redis Stream pending messages (broker queue lag)
+    - type: redis-streams
+      metadata:
+        address: maos-redis.maos.svc.cluster.local:6379
+        stream: maos:tasks:queue
+        consumerGroup: maos-workers
+        lagCount: "10"
+        # Scale up when more than 10 messages are pending per worker
+        activationLagCount: "5"
+      authenticationRef:
+        name: maos-redis-auth
+    # Also scale on CPU as a secondary signal
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: "70"
+---
+# TriggerAuthentication for KEDA Redis access
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: maos-redis-auth
+  namespace: maos
+spec:
+  secretTargetRef:
+    - parameter: password
+      name: maos-secrets
+      key: MAOS_REDIS_PASSWORD

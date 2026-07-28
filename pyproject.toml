@@ -1,0 +1,180 @@
+[project]
+name = "maos"
+version = "0.1.0"
+description = "Multi-Agent Orchestration System (MAOS) — standalone async orchestration service"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+authors = [{ name = "Healthcare Platform Team" }]
+
+# Runtime dependencies.
+# NOTE: provider SDKs (anthropic, openai, boto3, google-genai) MUST only be
+# imported behind the LLM_Provider_Adapter (src/maos/llm). They are never to be
+# imported directly from agent logic under src/maos/graphs (TC-4, Req 8.1).
+# All versions are exact-pinned (==) for reproducible builds (task 1.1).
+dependencies = [
+    # API surface (TC-2)
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.32.1",
+    # Orchestration (TC-3)
+    "langgraph[postgres]==1.2.0",
+    "langchain-core==0.3.28",
+    # Contracts / validation
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",
+    # Stateful backends
+    "redis==5.2.1",
+    "psycopg[binary,pool]==3.2.3",
+    "pgvector==0.3.6",
+    # Background execution (TC-8)
+    "arq==0.26.3",
+    # Observability (Req 10.5)
+    "opentelemetry-api==1.29.0",
+    "opentelemetry-sdk==1.29.0",
+    "opentelemetry-exporter-otlp==1.29.0",
+    "opentelemetry-instrumentation-fastapi==0.50b0",
+    "structlog==24.4.0",
+    # Error reporting (TC-10) — with FastAPI integration for unhandled exceptions
+    "sentry-sdk[fastapi]==2.19.2",
+    # LLM provider SDKs — imported ONLY behind the LLM adapter (TC-4)
+    "anthropic==0.42.0",
+    "openai==1.58.1",
+    "boto3==1.35.90",
+    "google-genai==0.3.0",
+    # Knowledge Base & Code Intelligence (Req 9.6)
+    "neo4j==5.25.0",
+    "tree-sitter==0.23.2",
+    "tree-sitter-python==0.23.6",
+    "tree-sitter-javascript==0.23.1",
+    "tree-sitter-typescript==0.23.2",
+    "tree-sitter-java==0.23.4",
+    "tree-sitter-go==0.23.4",
+    "tree-sitter-rust==0.23.2",
+    "PyPDF2==3.0.1",
+    "tiktoken==0.8.0",
+]
+
+[project.optional-dependencies]
+# Dev dependencies are exact-pinned (==) as well (task 1.1).
+dev = [
+    "pytest==8.3.4",
+    "pytest-asyncio==0.25.0",
+    "hypothesis==6.123.2",
+    "ruff==0.8.4",
+    "mypy==1.14.0",
+    "testcontainers==4.8.2",
+]
+# Optional secrets backends (Vault, AWS KMS). Not required for local dev
+# where EnvSecretsProvider reads from environment variables.
+secrets = [
+    "hvac==2.3.0",
+    "boto3==1.35.90",
+]
+# Optional agent tracing and error reporting backends (TC-10).
+# sentry-sdk is in main deps; these add the LLM tracing backends.
+# Not required for local dev — agent_tracing gracefully degrades when absent.
+observability = [
+    "langsmith==0.2.10",
+    "langfuse==2.57.4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/maos"]
+
+[tool.uv]
+# Treat the dev extra as the default development dependency group.
+default-groups = []
+
+# ---------------------------------------------------------------------------
+# Ruff — linting + formatting
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    "TID",  # flake8-tidy-imports
+    "RUF",  # ruff-specific rules
+]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+# UP047 (PEP 695 type params) conflicts with mypy strict when combined with
+# `from __future__ import annotations` on generic functions using TypeVar.
+"src/maos/resilience/**" = ["UP047"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["maos"]
+
+# ---------------------------------------------------------------------------
+# mypy — strict static type checking
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+no_implicit_optional = true
+mypy_path = "src"
+packages = ["maos"]
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+# Third-party packages without bundled type stubs.
+module = [
+    "pgvector.*",
+    "arq.*",
+    "boto3.*",
+    "google.genai.*",
+    "langgraph.*",
+    "langchain_core.*",
+    "opentelemetry.*",
+    "structlog.*",
+    "hvac.*",
+    "redis.*",
+    "psycopg.*",
+    "psycopg_pool.*",
+    "sentry_sdk.*",
+    "langsmith.*",
+    "langfuse.*",
+    "neo4j.*",
+    "tree_sitter.*",
+    "tree_sitter_python.*",
+    "tree_sitter_javascript.*",
+    "tree_sitter_typescript.*",
+    "tree_sitter_java.*",
+    "tree_sitter_go.*",
+    "tree_sitter_rust.*",
+    "PyPDF2.*",
+    "tiktoken.*",
+    "testcontainers.*",
+]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra"

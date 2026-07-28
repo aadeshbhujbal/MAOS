@@ -1,0 +1,86 @@
+# ---------------------------------------------------------------------------
+# retention-cronjob.yaml — CronJob for Working_Memory and Semantic_Memory
+# retention sweepers.
+#
+# Runs every hour, purging expired checkpoints and semantic_memory entries.
+# Entry point: python -m maos.memory.retention
+#
+# Requirements: 7.10, 14.3
+# ---------------------------------------------------------------------------
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: maos-retention-sweeper
+  namespace: maos
+  labels:
+    app.kubernetes.io/name: maos-retention-sweeper
+    app.kubernetes.io/component: retention
+    app.kubernetes.io/part-of: maos
+    app.kubernetes.io/version: "0.1.0"
+spec:
+  schedule: "0 * * * *"  # Every hour at minute 0
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    metadata:
+      labels:
+        app.kubernetes.io/name: maos-retention-sweeper
+        app.kubernetes.io/component: retention
+        app.kubernetes.io/part-of: maos
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: maos-retention-sweeper
+            app.kubernetes.io/component: retention
+            app.kubernetes.io/part-of: maos
+          annotations:
+            prometheus.io/scrape: "false"
+        spec:
+          restartPolicy: OnFailure
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: retention-sweeper
+              image: maos-worker:0.1.0
+              imagePullPolicy: IfNotPresent
+              command:
+                - python
+                - -m
+                - maos.memory.retention
+              envFrom:
+                - configMapRef:
+                    name: maos-config
+                - secretRef:
+                    name: maos-secrets
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  cpu: 100m
+                  memory: 256Mi
+              securityContext:
+                runAsNonRoot: true
+                readOnlyRootFilesystem: true
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: 10Mi

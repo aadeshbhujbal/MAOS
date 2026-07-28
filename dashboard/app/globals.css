@@ -1,0 +1,95 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * Design tokens (Requirement 9.2 — WCAG 2.1 AA contrast).
+ *
+ * Ratios below are computed from the token HSL values with the WCAG 2.x
+ * relative-luminance formula. Text pairs clear 4.5:1 (SC 1.4.3); tokens
+ * that outline interactive controls or draw focus indicators clear 3:1
+ * (SC 1.4.11). "before" is the shadcn/ui baseline these tokens started
+ * from; a changed lightness is noted alongside.
+ *
+ * Light theme — background #ffffff
+ *   token pair                        before    after
+ *   foreground       on background    19.99     19.99  (unchanged)
+ *   muted-foreground on background     4.75      5.67   l 46.9% → 42%
+ *   muted-foreground on muted          4.34      5.18   (was failing)
+ *   input border     on background     1.23      3.69   l 91.4% → 55% (was failing)
+ *   destructive-fg   on destructive    3.59      5.55   l 60.2% → 45% (was failing)
+ *   destructive text on background     3.76      5.81   (was failing)
+ *   ring             on background    19.99     19.99  (unchanged)
+ *
+ * Dark theme — background hsl(222.2 84% 4.9%)
+ *   foreground       on background    19.08     19.08  (unchanged)
+ *   muted-foreground on background     7.80      7.80  (unchanged)
+ *   muted-foreground on muted          5.70      5.70  (unchanged)
+ *   input border     on background     1.37      3.64   l 17.5% → 45% (was failing)
+ *   destructive-fg   on destructive     n/a      5.47   fg → hsl(222.2 47.4% 11.2%)
+ *   destructive text on background     2.00      6.13   l 30.6% → 65% (was failing)
+ *   ring             on background    13.46     13.46  (unchanged)
+ *
+ * `--border` stays low-contrast on purpose: it draws decorative dividers
+ * and card outlines, which SC 1.4.11 does not cover. Interactive controls
+ * must use `border-input`, which is contrast-checked above.
+ *
+ * These numbers cover the token palette only. Rendered contrast still has
+ * to be verified in a browser, including tinted badge surfaces built from
+ * Tailwind palette colors with alpha.
+ */
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 42%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 72% 45%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 55%;
+    --ring: 222.2 84% 4.9%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 72% 65%;
+    --destructive-foreground: 222.2 47.4% 11.2%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 45%;
+    --ring: 212.7 26.8% 83.9%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

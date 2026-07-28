@@ -1,0 +1,111 @@
+# syntax=docker/dockerfile:1
+# ---------------------------------------------------------------------------
+# Dockerfile.sandbox — Container image for the MAOS sandbox pool runtime
+#
+# Provides an isolated execution environment for code-executing Subagents.
+# Uses gVisor (runsc) as the OCI runtime for strong host isolation.
+# Network is restricted by default; CPU/memory/wall-clock limits are applied
+# at container launch via orchestration (K8s resource limits + seccomp).
+#
+# Security hardening:
+#   - No shell (nologin)
+#   - Read-only root filesystem (enforced via K8s securityContext)
+#   - Minimal packages — no wget/gnupg retained after gVisor install
+#   - Non-root execution
+#   - Restricted /sandbox/workspace only writable directory
+#
+# Requirements: 5.7, TC-9, TC-12
+# ---------------------------------------------------------------------------
+
+# ===========================================================================
+# Stage 1: builder — install minimal sandbox dependencies
+# ===========================================================================
+FROM python:3.12-slim AS builder
+
+# Install uv for dependency installation
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir uv==0.5.11
+
+WORKDIR /build
+
+# Copy only what the sandbox needs — minimal subset of the project
+COPY --link pyproject.toml ./
+COPY --link src/maos/__init__.py ./src/maos/__init__.py
+COPY --link src/maos/mcp/ ./src/maos/mcp/
+COPY --link src/maos/contracts/ ./src/maos/contracts/
+COPY --link src/maos/config/ ./src/maos/config/
+
+# Install only core dependencies needed for sandbox execution
+RUN uv venv /opt/venv && \
+    . /opt/venv/bin/activate && \
+    uv pip install --no-cache \
+        pydantic==2.10.4 \
+        pydantic-settings==2.7.0 \
+        redis==5.2.1 \
+        structlog==24.4.0
+
+# ===========================================================================
+# Stage 2: gvisor — install gVisor runsc in an intermediate stage
+# ===========================================================================
+FROM python:3.12-slim AS gvisor-installer
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        wget \
+        apt-transport-https \
+        ca-certificates \
+        gnupg \
+    && wget -qO - https://gvisor.dev/archive.key | gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
+        > /etc/apt/sources.list.d/gvisor.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends runsc \
+    && rm -rf /var/lib/apt/lists/*
+
+# ===========================================================================
+# Stage 3: runtime — gVisor-compatible minimal image (security hardened)
+# ===========================================================================
+FROM python:3.12-slim AS runtime
+
+LABEL maintainer="Healthcare Platform Team"
+LABEL org.opencontainers.image.title="maos-sandbox"
+LABEL org.opencontainers.image.description="MAOS sandbox pool runtime — gVisor isolated execution"
+LABEL org.opencontainers.image.version="0.1.0"
+LABEL org.opencontainers.image.source="https://github.com/healthcare-platform/maos"
+LABEL org.opencontainers.image.licenses="Proprietary"
+LABEL org.opencontainers.image.vendor="Healthcare Platform Team"
+
+# Copy only the runsc binary from the gVisor installer stage (no wget/gnupg in final image)
+COPY --from=gvisor-installer /usr/bin/runsc /usr/bin/runsc
+
+# Copy virtual environment from builder
+COPY --link --from=builder /opt/venv /opt/venv
+
+# Copy sandbox pool manager script
+COPY --link src/maos/mcp/sandbox.py /opt/maos/sandbox.py
+
+# Set PATH to use the virtual environment
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Create non-root user for security (no shell for hardening)
+RUN groupadd --gid 1000 sandbox && \
+    useradd --uid 1000 --gid 1000 --no-create-home --shell /sbin/nologin sandbox
+
+# Create a restricted workspace for sandboxed code execution
+# This is the only writable directory when readOnlyRootFilesystem=true
+RUN mkdir -p /sandbox/workspace && \
+    chown sandbox:sandbox /sandbox/workspace && \
+    chmod 700 /sandbox/workspace
+
+# Remove shell access for hardening (busybox sh remains for Python subprocess)
+RUN rm -f /bin/bash /usr/bin/bash
+
+USER sandbox
+
+# Network restricted by default (enforced via K8s NetworkPolicy + gVisor)
+# No ports exposed — the sandbox pool listens on an internal Unix socket or
+# is invoked directly by the orchestration worker via gRPC/stdin.
+
+ENTRYPOINT ["python", "-m", "maos.mcp.sandbox"]

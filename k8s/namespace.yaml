@@ -1,0 +1,12 @@
+# ---------------------------------------------------------------------------
+# namespace.yaml — Dedicated namespace for MAOS workloads
+#
+# Requirements: 14.5, 14.6, TC-12
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: maos
+  labels:
+    app.kubernetes.io/part-of: maos
+    app.kubernetes.io/managed-by: kiro

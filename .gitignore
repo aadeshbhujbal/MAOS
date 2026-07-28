@@ -1,0 +1,88 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ---- Virtual environments ----
+.venv/
+venv/
+env/
+ENV/
+
+# ---- uv ----
+# Keep uv.lock checked in for reproducible builds; ignore the local cache.
+.uv/
+
+# ---- Tooling caches ----
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# ---- Type checking / test artifacts ----
+.tox/
+.nox/
+
+# ---- Environment / secrets (TC-13: never commit secrets) ----
+.env
+.env.*
+!.env.example
+!dashboard/.env.local.example
+*.pem
+*.key
+
+# ---- IDE / OS ----
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ---- Node.js / Dashboard ----
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+dashboard/.env.local
+package-lock.json
+
+# ---- Package manager locks (keep package-lock.json) ----
+yarn.lock
+pnpm-lock.yaml
+
+# ---- Build outputs ----
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ---- Misc artifacts ----
+$null
+ProviderFailureError

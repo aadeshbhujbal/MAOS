@@ -1,0 +1,127 @@
+# ---------------------------------------------------------------------------
+# ingress.yaml — Ingress with TLS, OAuth2 proxy auth, and rate limiting
+#
+# Uses nginx-ingress controller with:
+# - TLS termination (cert-manager)
+# - OAuth2 proxy annotation for authentication
+# - Rate limiting annotations for DDoS protection and cost control
+#
+# Requirements: 9.9, 14.5, 14.6, 15.2, 15.3, TC-12
+# ---------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: maos-api
+  namespace: maos
+  labels:
+    app.kubernetes.io/name: maos-api
+    app.kubernetes.io/component: ingress
+    app.kubernetes.io/part-of: maos
+  annotations:
+    # TLS via cert-manager
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+
+    # nginx-ingress rate limiting (global edge layer)
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "3"
+    nginx.ingress.kubernetes.io/limit-connections: "50"
+    nginx.ingress.kubernetes.io/limit-whitelist: ""
+
+    # OAuth2 proxy for authentication (external auth subrequest)
+    nginx.ingress.kubernetes.io/auth-url: "https://oauth2-proxy.maos.svc.cluster.local/oauth2/auth"
+    nginx.ingress.kubernetes.io/auth-signin: "https://oauth2-proxy.maos.svc.cluster.local/oauth2/start?rd=$scheme://$host$request_uri"
+    nginx.ingress.kubernetes.io/auth-response-headers: "X-Auth-Request-User,X-Auth-Request-Email,X-Auth-Request-Groups,Authorization"
+
+    # Security headers
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "X-XSS-Protection: 1; mode=block";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+      more_set_headers "Strict-Transport-Security: max-age=31536000; includeSubDomains";
+
+    # Request body size limit
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+
+    # Timeouts (long-running orchestration tasks may take time to accept)
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "10"
+
+    # CORS for platform system clients
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "Authorization, Content-Type, X-Request-ID, X-Tenant-ID"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - maos.healthcare-platform.io
+      secretName: maos-tls-cert
+  rules:
+    - host: maos.healthcare-platform.io
+      http:
+        paths:
+          # API endpoints (authenticated)
+          - path: /v1/
+            pathType: Prefix
+            backend:
+              service:
+                name: maos-api
+                port:
+                  number: 8000
+          # Health endpoints (bypass auth via separate ingress below)
+          - path: /healthz
+            pathType: Exact
+            backend:
+              service:
+                name: maos-api
+                port:
+                  number: 8000
+          - path: /readyz
+            pathType: Exact
+            backend:
+              service:
+                name: maos-api
+                port:
+                  number: 8000
+---
+# Separate Ingress for health/readiness endpoints (no auth required)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: maos-api-health
+  namespace: maos
+  labels:
+    app.kubernetes.io/name: maos-api
+    app.kubernetes.io/component: ingress-health
+    app.kubernetes.io/part-of: maos
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # No auth annotations — health checks are public
+    nginx.ingress.kubernetes.io/limit-rps: "10"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "2"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - maos.healthcare-platform.io
+      secretName: maos-tls-cert
+  rules:
+    - host: maos.healthcare-platform.io
+      http:
+        paths:
+          - path: /healthz
+            pathType: Exact
+            backend:
+              service:
+                name: maos-api
+                port:
+                  number: 8000
+          - path: /readyz
+            pathType: Exact
+            backend:
+              service:
+                name: maos-api
+                port:
+                  number: 8000

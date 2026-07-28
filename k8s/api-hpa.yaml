@@ -1,0 +1,49 @@
+# ---------------------------------------------------------------------------
+# api-hpa.yaml — HorizontalPodAutoscaler for maos-api
+#
+# Scales API pods based on CPU utilization. Designed for ~500,000 users.
+#
+# Requirements: 14.5, 14.6, TC-12
+# ---------------------------------------------------------------------------
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: maos-api
+  namespace: maos
+  labels:
+    app.kubernetes.io/name: maos-api
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: maos
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: maos-api
+  minReplicas: 2
+  maxReplicas: 10
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80

@@ -1,0 +1,86 @@
+# ---------------------------------------------------------------------------
+# worker-deployment.yaml — Deployment for maos-worker (Arq orchestration)
+#
+# Stateless Arq workers that pull Tasks from the broker queue and execute
+# LangGraph orchestration graphs. Scale based on broker queue lag.
+#
+# Requirements: 14.1, 14.2, 14.5, 14.6, TC-8, TC-12
+# ---------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: maos-worker
+  namespace: maos
+  labels:
+    app.kubernetes.io/name: maos-worker
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: maos
+    app.kubernetes.io/version: "0.1.0"
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 2
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: maos-worker
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: maos-worker
+        app.kubernetes.io/component: worker
+        app.kubernetes.io/part-of: maos
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: maos-worker
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: maos-worker
+          image: maos-worker:0.1.0
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: maos-config
+            - secretRef:
+                name: maos-secrets
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 200Mi
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: maos-worker

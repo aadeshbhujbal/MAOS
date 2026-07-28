@@ -1,0 +1,83 @@
+# ---------------------------------------------------------------------------
+# migration-job.yaml — Kubernetes Job for applying DB migrations in order
+#
+# Runs SQL migration files from src/maos/migrations/ sequentially against
+# the Postgres database. Intended to be applied before deploying new
+# application versions (e.g., as a pre-upgrade hook or manual trigger).
+#
+# Entry point: python -m maos.migrations.run
+#
+# Requirements: 14.3
+# ---------------------------------------------------------------------------
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: maos-db-migration
+  namespace: maos
+  labels:
+    app.kubernetes.io/name: maos-db-migration
+    app.kubernetes.io/component: migration
+    app.kubernetes.io/part-of: maos
+    app.kubernetes.io/version: "0.1.0"
+  annotations:
+    # Helm hook ordering (if using Helm):
+    # helm.sh/hook: pre-upgrade,pre-install
+    # helm.sh/hook-weight: "-5"
+    # helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  completions: 1
+  parallelism: 1
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: maos-db-migration
+        app.kubernetes.io/component: migration
+        app.kubernetes.io/part-of: maos
+      annotations:
+        prometheus.io/scrape: "false"
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migration
+          image: maos-worker:0.1.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - -m
+            - maos.migrations.run
+          envFrom:
+            - configMapRef:
+                name: maos-config
+            - secretRef:
+                name: maos-secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 10Mi

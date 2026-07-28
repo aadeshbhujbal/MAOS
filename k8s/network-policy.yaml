@@ -1,0 +1,294 @@
+# ---------------------------------------------------------------------------
+# network-policy.yaml — NetworkPolicies for MAOS workloads
+#
+# Defense-in-depth network segmentation:
+# - API pods: accept ingress on 8000 from ingress controller only
+# - Workers: egress only to Postgres (PgBouncer), Redis, and MCP servers
+# - Sandbox: isolated — no egress except internal communication to workers
+#
+# Requirements: 14.5, 14.6, TC-12
+# ---------------------------------------------------------------------------
+
+# --- Default deny all ingress/egress in the namespace ---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: maos
+  labels:
+    app.kubernetes.io/part-of: maos
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# --- API pods: allow ingress from ingress controller on port 8000 ---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-ingress
+  namespace: maos
+  labels:
+    app.kubernetes.io/part-of: maos
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: maos-api
+      app.kubernetes.io/component: api
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8000
+
+---
+# --- API pods: allow egress to PgBouncer, Redis, broker, and DNS ---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-egress
+  namespace: maos
+  labels:
+    app.kubernetes.io/part-of: maos
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: maos-api
+      app.kubernetes.io/component: api
+  policyTypes:
+    - Egress
+  egress:
+    # PgBouncer
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: maos-pgbouncer
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Redis (shared context, cache, broker)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: maos-redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # DNS resolution
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # OTel collector for observability
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+      ports:
+        - protocol: TCP
+          port: 4317
+
+---
+# --- Worker pods: allow egress to Postgres, Redis, MCP servers, LLM, DNS ---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-worker-egress
+  namespace: maos
+  labels:
+    app.kubernetes.io/part-of: maos
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: maos-worker
+      app.kubernetes.io/component: worker
+  policyTypes:
+    - Egress
+  egress:
+    # PgBouncer
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: maos-pgbouncer
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Redis (shared context, cache, broker)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: maos-redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # Sandbox pods (internal communication)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: maos-sandbox
+    # MCP servers (filesystem, git, domain APIs) — namespace-scoped
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: mcp-server
+    # External LLM providers (HTTPS)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+    # DNS resolution
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # OTel collector
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+      ports:
+        - protocol: TCP
+          port: 4317
+
+---
+# --- PgBouncer: allow ingress from API and workers on 5432 ---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-pgbouncer-ingress
+  namespace: maos
+  labels:
+    app.kubernetes.io/part-of: maos
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: maos-pgbouncer
+      app.kubernetes.io/component: pgbouncer
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: maos-api
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: maos-worker
+      ports:
+        - protocol: TCP
+          port: 5432
+
+---
+# --- PgBouncer: allow egress to Postgres backend ---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-pgbouncer-egress
+  namespace: maos
+  labels:
+    app.kubernetes.io/part-of: maos
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: maos-pgbouncer
+      app.kubernetes.io/component: pgbouncer
+  policyTypes:
+    - Egress
+  egress:
+    # Postgres backend (may be external or in-cluster)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: maos-postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    # DNS resolution
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# --- Sandbox: isolated — only accept from workers, no egress except DNS ---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-sandbox-ingress
+  namespace: maos
+  labels:
+    app.kubernetes.io/part-of: maos
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: maos-sandbox
+      app.kubernetes.io/component: sandbox
+  policyTypes:
+    - Ingress
+  ingress:
+    # Only workers can communicate with sandbox pods
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: maos-worker
+              app.kubernetes.io/component: worker
+
+---
+# --- Sandbox: minimal egress (DNS only for internal resolution) ---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-sandbox-egress
+  namespace: maos
+  labels:
+    app.kubernetes.io/part-of: maos
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: maos-sandbox
+      app.kubernetes.io/component: sandbox
+  policyTypes:
+    - Egress
+  egress:
+    # DNS only — no external network access for sandboxed code
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

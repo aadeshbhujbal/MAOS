@@ -1,0 +1,80 @@
+# ---------------------------------------------------------------------------
+# sandbox-deployment.yaml — Deployment for maos-sandbox pool
+#
+# Pool of sandbox pods pre-warmed for code-executing Subagents.
+# Requires privileged access for gVisor (runsc) operation.
+# Network-isolated by NetworkPolicy.
+#
+# Requirements: 5.7, TC-9, TC-12
+# ---------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: maos-sandbox
+  namespace: maos
+  labels:
+    app.kubernetes.io/name: maos-sandbox
+    app.kubernetes.io/component: sandbox
+    app.kubernetes.io/part-of: maos
+    app.kubernetes.io/version: "0.1.0"
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 2
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: maos-sandbox
+      app.kubernetes.io/component: sandbox
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: maos-sandbox
+        app.kubernetes.io/component: sandbox
+        app.kubernetes.io/part-of: maos
+    spec:
+      serviceAccountName: maos-sandbox
+      automountServiceAccountToken: false
+      # Node selector for gVisor-enabled nodes
+      nodeSelector:
+        sandbox.gvisor.io/enabled: "true"
+      tolerations:
+        - key: sandbox.gvisor.io/dedicated
+          operator: Exists
+          effect: NoSchedule
+      runtimeClassName: gvisor
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: maos-sandbox
+          image: maos-sandbox:0.1.0
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            # gVisor requires ptrace for user-space kernel; handled via RuntimeClass
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: workspace
+              mountPath: /sandbox/workspace
+      volumes:
+        - name: workspace
+          emptyDir:
+            sizeLimit: 512Mi

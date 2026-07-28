@@ -1,0 +1,67 @@
+# ---------------------------------------------------------------------------
+# .dockerignore — Exclude files from Docker build context
+#
+# Keeps the build context minimal for faster builds and smaller images.
+# ---------------------------------------------------------------------------
+
+# Version control
+.git
+.gitignore
+
+# Python caches and artifacts
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+*.egg-info
+*.egg
+dist/
+build/
+wheels/
+
+# Virtual environments
+.venv
+venv/
+env/
+
+# Tool caches
+.mypy_cache
+.ruff_cache
+.pytest_cache
+.hypothesis
+.cache
+htmlcov
+.coverage
+.coverage.*
+coverage.xml
+
+# Environment and secrets (never include in images)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Tests (not needed in production images)
+tests/
+
+# Node modules (if any tooling is present)
+node_modules/
+
+# IDE and OS files
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Documentation and misc
+README.md
+Makefile
+$null
+ProviderFailureError
+_validate.py
+_verify_sm.py
+
+# uv cache
+.uv/
