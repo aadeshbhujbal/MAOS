@@ -198,9 +198,9 @@ Client ──GET /v1/tasks/{id}──┘
 |----------|---------|---------|
 | Python | 3.12+ | Runtime |
 | uv | latest | Package management (fast pip alternative) |
-| Postgres | 15+ | Primary database (checkpoints, audit, registry) |
+| Postgres | 15+ | Primary database (checkpoints, audit, registry, code graph) |
 | pgvector extension | 0.5+ | Semantic_Memory vector search |
-| Redis | 7+ | Shared_Context, message bus, broker |
+| Dragonfly | latest | Shared_Context, message bus, broker (Redis-compatible) |
 | Docker | 24+ | Container builds |
 | kubectl | 1.28+ | Kubernetes deployment (production) |
 
@@ -208,7 +208,6 @@ Client ──GET /v1/tasks/{id}──┘
 
 | Software | Purpose |
 |----------|---------|
-| Dragonfly | High-performance Redis-compatible cache (replaces Redis for caching) |
 | HashiCorp Vault | Production secrets management |
 | KEDA | Kubernetes event-driven autoscaling for workers |
 | gVisor (runsc) | Sandbox isolation for code execution |
@@ -267,14 +266,14 @@ docker run -d \
   pgvector/pgvector:pg16
 ```
 
-### Step 5: Start Redis
+### Step 5: Start Dragonfly (Redis-compatible)
 
 ```bash
 # Using Docker:
 docker run -d \
-  --name maos-redis \
+  --name maos-dragonfly \
   -p 6379:6379 \
-  redis:7-alpine
+  docker.dragonflydb.io/dragonflydb/dragonfly:latest
 ```
 
 ### Step 6: Configure Environment Variables
@@ -2189,8 +2188,12 @@ export async function requestAppointmentHelp(
 For convenience, here's a complete docker-compose setup for local development:
 
 ```yaml
-# docker-compose.yml (place in maos/ directory)
-version: "3.9"
+# docker-compose.local.yml — full local development stack
+# Usage: docker compose -f docker-compose.local.yml up -d
+#
+# For Coolify production deployment, use docker-compose.coolify.yml
+# which only contains app services (api, worker, dashboard).
+# Databases are managed externally on Coolify.
 
 services:
   postgres:
@@ -2209,8 +2212,8 @@ services:
       timeout: 5s
       retries: 5
 
-  redis:
-    image: redis:7-alpine
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
     ports:
       - "6379:6379"
     healthcheck:
@@ -2218,12 +2221,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-
-  dragonfly:
-    image: docker.dragonflydb.io/dragonflydb/dragonfly
-    ports:
-      - "6380:6379"
-    command: ["--requirepass", ""]
 
   api:
     build:
@@ -2233,15 +2230,15 @@ services:
       - "8000:8000"
     environment:
       MAOS_POSTGRES_DSN: postgresql://maos:maos@postgres:5432/maos
-      MAOS_REDIS_URL: redis://redis:6379/0
-      MAOS_BROKER_URL: redis://redis:6379/1
-      MAOS_DRAGONFLY_CACHE_URL: redis://dragonfly:6379/0
+      MAOS_REDIS_URL: redis://dragonfly:6379/0
+      MAOS_BROKER_URL: redis://dragonfly:6379/1
+      MAOS_DRAGONFLY_CACHE_URL: redis://dragonfly:6379/2
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       SECRETS_BACKEND: env
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
+      dragonfly:
         condition: service_healthy
 
   worker:
@@ -2250,15 +2247,15 @@ services:
       dockerfile: Dockerfile.worker
     environment:
       MAOS_POSTGRES_DSN: postgresql://maos:maos@postgres:5432/maos
-      MAOS_REDIS_URL: redis://redis:6379/0
-      MAOS_BROKER_URL: redis://redis:6379/1
-      MAOS_DRAGONFLY_CACHE_URL: redis://dragonfly:6379/0
+      MAOS_REDIS_URL: redis://dragonfly:6379/0
+      MAOS_BROKER_URL: redis://dragonfly:6379/1
+      MAOS_DRAGONFLY_CACHE_URL: redis://dragonfly:6379/2
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       SECRETS_BACKEND: env
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
+      dragonfly:
         condition: service_healthy
 
   migrate:

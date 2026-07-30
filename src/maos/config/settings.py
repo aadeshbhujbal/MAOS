@@ -18,8 +18,8 @@ from functools import lru_cache
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from maos.config.graph_settings import GraphSettings
 from maos.config.knowledge_settings import KnowledgeSettings
-from maos.config.neo4j_settings import Neo4jSettings
 
 
 class PostgresSettings(BaseSettings):
@@ -177,7 +177,7 @@ class Settings(BaseSettings):
     scalability: ScalabilitySettings = Field(default_factory=ScalabilitySettings)
     dragonfly_cache: DragonflyCacheSettings = Field(default_factory=DragonflyCacheSettings)
     knowledge: KnowledgeSettings = Field(default_factory=KnowledgeSettings)
-    neo4j: Neo4jSettings = Field(default_factory=Neo4jSettings)
+    graph: GraphSettings = Field(default_factory=GraphSettings)
 
 
 @lru_cache(maxsize=1)

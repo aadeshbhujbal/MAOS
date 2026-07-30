@@ -1,7 +1,7 @@
 """Code Graph Builder — Build and incrementally update code graphs from AST.
 
-This module provides the ``CodeGraphBuilder`` class that constructs a knowledge
-graph from Tree-sitter parsed AST entities. It creates nodes for each code entity
+This module provides the ``CodeGraphBuilder`` class that constructs a PostgreSQL
+Knowledge Graph from Tree-sitter parsed AST entities. It creates nodes for each code entity
 and edges for CALLS, IMPORTS, INHERITS, and IMPLEMENTS relationships. Supports
 incremental re-parsing on git commit (only modified files), circular dependency
 detection, and maintains a symbol index mapping fully qualified names to file
@@ -232,8 +232,8 @@ class CodeGraphBuilder:
     """Builds and maintains a code knowledge graph from parsed AST entities.
 
     Uses ``CodeParser`` (Tree-sitter) to parse source files and
-    ``KnowledgeGraphClient`` (Neo4j) to store the resulting graph of code
-    entities and their relationships.
+    ``KnowledgeGraphClient`` (PostgreSQL adjacency tables) to store the
+    resulting graph of code entities and their relationships.
 
     Supports:
     - Full repository graph construction

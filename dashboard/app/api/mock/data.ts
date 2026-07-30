@@ -220,7 +220,6 @@ export const MOCK_SERVICES: ServiceHealth[] = [
   { service: "Arq Workers", status: "healthy", latency_ms: 8, last_check: ago(1) },
   { service: "PostgreSQL", status: "healthy", latency_ms: 3, last_check: ago(1) },
   { service: "Dragonfly", status: "healthy", latency_ms: 1, last_check: ago(1) },
-  { service: "Neo4j", status: "degraded", latency_ms: 245, last_check: ago(1) },
 ];
 
 export const MOCK_MCP_SERVERS: MCPServerStatus[] = [

@@ -43,8 +43,7 @@ const EXPECTED_SERVICES = [
   "API workers",
   "Arq workers",
   "Postgres",
-  "Redis",
-  "Neo4j",
+  "Dragonfly",
 ] as const;
 
 /** Normalize a service name for matching backend variants. */

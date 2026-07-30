@@ -8,9 +8,8 @@
 #
 # Service Ports:
 #   - API: 8000 (FastAPI service)
-#   - Redis: 6379 (message broker)
+#   - Dragonfly: 6379 (message broker / cache)
 #   - Postgres: 5432 (database)
-#   - PGAdmin: 8080 (PostgreSQL admin UI)
 
 version: "3.8"
 
@@ -41,16 +40,19 @@ services:
       DB_USER: postgres
       DB_PASSWORD: postgres
 
-      # Redis Configuration (Message Broker)
-      REDIS_HOST: redis
+      # Dragonfly Configuration (Redis-compatible broker/cache)
+      REDIS_HOST: dragonfly
       REDIS_PORT: 6379
       REDIS_DB: 0
       REDIS_PASSWORD: ""
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://dragonfly:6379/0
 
       # LangGraph Configuration
       LANGGRAPH_URL: postgresql://postgres:postgres@postgres:5432/maos_db?application_name=langgraph
       LANGGRAPH_CHECKPOINTER: postgres
+
+      # Knowledge Graph (PostgreSQL adjacency tables)
+      MAOS_GRAPH_DSN: postgresql://postgres:postgres@postgres:5432/maos_db
 
       # Security
       SECRET_KEY: your-super-secret-key-change-in-production
@@ -60,16 +62,12 @@ services:
       # Metrics & Monitoring
       ENABLE_METRICS: true
       SENTRY_DSN: ""
-
-      # Neo4j Configuration
-      NEO4J_URI: bolt://neo4j:7687
-      NEO4J_AUTH: neo4j/maos_knowledge
     volumes:
       - ./logs:/app/logs
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
+      dragonfly:
         condition: service_healthy
     networks:
       - maos-network
@@ -109,16 +107,19 @@ services:
       DB_HOST: postgres
       DB_PORT: 5432
 
-      # Redis Configuration (Message Broker)
-      REDIS_HOST: redis
+      # Dragonfly Configuration (Redis-compatible broker/cache)
+      REDIS_HOST: dragonfly
       REDIS_PORT: 6379
       REDIS_DB: 0
       REDIS_PASSWORD: ""
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://dragonfly:6379/0
 
       # LangGraph Configuration
       LANGGRAPH_URL: postgresql://postgres:postgres@postgres:5432/maos_db?application_name=langgraph
       LANGGRAPH_CHECKPOINTER: postgres
+
+      # Knowledge Graph (PostgreSQL adjacency tables)
+      MAOS_GRAPH_DSN: postgresql://postgres:postgres@postgres:5432/maos_db
 
       # Worker Settings
       WORKER_COUNT: 4
@@ -127,16 +128,12 @@ services:
 
       # Security
       SECRET_KEY: your-super-secret-key-change-in-production
-
-      # Neo4j Configuration
-      NEO4J_URI: bolt://neo4j:7687
-      NEO4J_AUTH: neo4j/maos_knowledge
     volumes:
       - ./logs:/app/logs
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
+      dragonfly:
         condition: service_healthy
     networks:
       - maos-network
@@ -152,21 +149,15 @@ services:
           memory: 512M
 
   # ---------------------------------------------------------------------------
-  # Redis - Message Broker for task queuing
+  # Dragonfly - Redis-compatible in-memory store for message broker and caching
   # ---------------------------------------------------------------------------
-  redis:
-    image: redis:7-alpine
-    container_name: maos-redis
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
+    container_name: maos-dragonfly
     ports:
       - "6379:6379"
-    command: >
-      redis-server
-      --appendonly yes
-      --maxmemory 512mb
-      --maxmemory-policy allkeys-lru
-      --requirepass ""
     volumes:
-      - redis_data:/data
+      - dragonfly_data:/data
     networks:
       - maos-network
     healthcheck:
@@ -186,46 +177,7 @@ services:
           memory: 128M
 
   # ---------------------------------------------------------------------------
-  # Neo4j - Graph Database for Knowledge Base
-  # ---------------------------------------------------------------------------
-  neo4j:
-    image: neo4j:5-community
-    container_name: maos-neo4j
-    ports:
-      - "7474:7474"
-      - "7687:7687"
-    environment:
-      NEO4J_AUTH: neo4j/maos_knowledge
-      NEO4J_PLUGINS: '["apoc"]'
-      NEO4J_server_memory_pagecache_size: 256M
-      NEO4J_server_memory_heap_initial__size: 256M
-      NEO4J_server_memory_heap_max__size: 512M
-    volumes:
-      - neo4j_data:/data
-    networks:
-      - maos-network
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 1G
-        reservations:
-          cpus: "0.2"
-          memory: 512M
-
-  # ---------------------------------------------------------------------------
-  # PostgreSQL - Primary Database
+  # PostgreSQL - Primary Database (with pgvector for embeddings)
   # Optimized for 10 users with moderate load
   # ---------------------------------------------------------------------------
   postgres:
@@ -285,90 +237,13 @@ services:
           cpus: "0.5"
           memory: 512M
 
-  # ---------------------------------------------------------------------------
-  # PGAdmin - PostgreSQL Admin UI
-  # Optional management interface
-  # ---------------------------------------------------------------------------
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: maos-pgadmin
-    ports:
-      - "8080:80"
-    environment:
-      PGADMIN_DEFAULT_EMAIL: admin@example.com
-      PGADMIN_DEFAULT_PASSWORD: admin
-      PGADMIN_CONFIG_SERVER_MODE: "False"
-      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - maos-network
-    restart: unless-stopped
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "wget --no-verbose --tries=1 --spider http://localhost:8080/login || exit 1",
-        ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          cpus: "0.2"
-          memory: 256M
-        reservations:
-          cpus: "0.1"
-          memory: 128M
-
-  # ---------------------------------------------------------------------------
-  # Redis Commander - Redis Admin UI
-  # Optional management interface for Redis
-  # ---------------------------------------------------------------------------
-  redis-commander:
-    image: rediscommander/redis-commander:latest
-    container_name: maos-redis-commander
-    ports:
-      - "8081:8081"
-    environment:
-      REDIS_HOSTS: local:redis:6379
-      HTTP_USER: admin
-      HTTP_PASSWORD: admin
-    depends_on:
-      redis:
-        condition: service_healthy
-    networks:
-      - maos-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8081 || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          cpus: "0.2"
-          memory: 128M
-        reservations:
-          cpus: "0.1"
-          memory: 64M
-
 # ---------------------------------------------------------------------------
 # Volumes
 # ---------------------------------------------------------------------------
 volumes:
   postgres_data:
     driver: local
-  redis_data:
-    driver: local
-  pgadmin_data:
-    driver: local
-  neo4j_data:
+  dragonfly_data:
     driver: local
 
 # ---------------------------------------------------------------------------

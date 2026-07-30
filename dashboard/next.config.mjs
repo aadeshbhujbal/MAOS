@@ -9,6 +9,7 @@
  */
 const nextConfig = {
   reactStrictMode: true,
+  output: "standalone",
 
   /**
    * Rewrites proxy `/v1/*` to the internal mock API route handlers at

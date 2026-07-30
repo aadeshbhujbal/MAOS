@@ -1,0 +1,288 @@
+# Multi-Agent Orchestration System - Local Development
+# All services run locally for development and testing.
+#
+# Usage:
+#   docker compose -f docker-compose.local.yml up -d
+#   Access API at: http://localhost:8000
+#   API docs at: http://localhost:8000/docs
+#
+# Service Ports:
+#   - API: 8000 (FastAPI service)
+#   - Dragonfly: 6379 (Redis-compatible cache/broker)
+#   - Postgres: 5432 (database + pgvector + code graph)
+#   - PGAdmin: 8080 (PostgreSQL admin UI)
+
+services:
+  # ---------------------------------------------------------------------------
+  # API Server - FastAPI application for task management and orchestration
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: maos-api
+    ports:
+      - "8000:8000"
+    environment:
+      # Application Settings
+      ENVIRONMENT: production
+      APP_NAME: maos-local
+      SERVICE_NAME: api
+      LOG_LEVEL: info
+      DEBUG: "false"
+
+      # Database Configuration
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/maos_db?application_name=maos-api
+      MAOS_POSTGRES_DSN: postgresql://postgres:postgres@postgres:5432/maos_db
+
+      # Dragonfly Configuration (Redis-compatible)
+      MAOS_REDIS_URL: redis://dragonfly:6379/0
+      MAOS_BROKER_URL: redis://dragonfly:6379/1
+      MAOS_DRAGONFLY_CACHE_URL: redis://dragonfly:6379/2
+      DRAGONFLY_URL: redis://dragonfly:6379/0
+
+      # LangGraph Configuration
+      LANGGRAPH_URL: postgresql://postgres:postgres@postgres:5432/maos_db?application_name=langgraph
+      LANGGRAPH_CHECKPOINTER: postgres
+
+      # Security
+      SECRET_KEY: your-super-secret-key-change-in-production
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 30
+
+      # Metrics & Monitoring
+      ENABLE_METRICS: "true"
+      SENTRY_DSN: ""
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dragonfly:
+        condition: service_healthy
+    networks:
+      - maos-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+
+  # ---------------------------------------------------------------------------
+  # Worker Service - Handles task execution via LangGraph
+  # ---------------------------------------------------------------------------
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: maos-worker
+    environment:
+      # Application Settings
+      ENVIRONMENT: production
+      SERVICE_NAME: worker
+      LOG_LEVEL: info
+      DEBUG: "false"
+
+      # Database Configuration
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/maos_db?application_name=maos-worker
+      MAOS_POSTGRES_DSN: postgresql://postgres:postgres@postgres:5432/maos_db
+
+      # Dragonfly Configuration (Redis-compatible)
+      MAOS_REDIS_URL: redis://dragonfly:6379/0
+      MAOS_BROKER_URL: redis://dragonfly:6379/1
+      MAOS_DRAGONFLY_CACHE_URL: redis://dragonfly:6379/2
+      DRAGONFLY_URL: redis://dragonfly:6379/0
+
+      # LangGraph Configuration
+      LANGGRAPH_URL: postgresql://postgres:postgres@postgres:5432/maos_db?application_name=langgraph
+      LANGGRAPH_CHECKPOINTER: postgres
+
+      # Worker Settings
+      WORKER_COUNT: 4
+      WORKER_MAX_CONCURRENCY: 10
+      JOB_TIMEOUT: 300
+
+      # Security
+      SECRET_KEY: your-super-secret-key-change-in-production
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dragonfly:
+        condition: service_healthy
+    networks:
+      - maos-network
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+        reservations:
+          cpus: "1.0"
+          memory: 512M
+
+  # ---------------------------------------------------------------------------
+  # Dragonfly - High-performance Redis-compatible in-memory store
+  # Used for: message broker, caching, Shared_Context
+  # ---------------------------------------------------------------------------
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
+    container_name: maos-dragonfly
+    ports:
+      - "6379:6379"
+    command: >
+      dragonfly
+      --maxmemory=512mb
+      --proactor_threads=2
+    volumes:
+      - dragonfly_data:/data
+    networks:
+      - maos-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+        reservations:
+          cpus: "0.2"
+          memory: 128M
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL - Primary Database (pgvector for embeddings + code graph tables)
+  # Optimized for development with moderate load
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: maos-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: maos_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    command: >
+      postgres
+      -c max_connections=100
+      -c shared_buffers=128MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=4MB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+      -c max_worker_processes=4
+      -c max_parallel_workers_per_gather=2
+      -c max_parallel_workers=4
+      -c max_parallel_maintenance_workers=2
+      -c log_connections=on
+      -c log_disconnections=on
+      -c log_statement='all'
+      -c log_duration=on
+      -c log_line_prefix='%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h '
+      -c log_timezone='UTC'
+      -c timezone='UTC'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - maos-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d maos_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+
+  # ---------------------------------------------------------------------------
+  # PGAdmin - PostgreSQL Admin UI
+  # ---------------------------------------------------------------------------
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: maos-pgadmin
+    ports:
+      - "8080:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - maos-network
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget --no-verbose --tries=1 --spider http://localhost:8080/login || exit 1",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
+
+# ---------------------------------------------------------------------------
+# Volumes
+# ---------------------------------------------------------------------------
+volumes:
+  postgres_data:
+    driver: local
+  dragonfly_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+# ---------------------------------------------------------------------------
+# Networks
+# ---------------------------------------------------------------------------
+networks:
+  maos-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

@@ -263,7 +263,7 @@ export interface WSEvent {
  * Reported by the health monitoring subsystem.
  */
 export interface ServiceHealth {
-  /** Service name (e.g., API workers, Arq workers, Postgres, Redis, Neo4j). */
+  /** Service name (e.g., API workers, Arq workers, Postgres, Dragonfly). */
   service: string;
   /** Current health status. */
   status: "healthy" | "degraded" | "unavailable";

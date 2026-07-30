@@ -1,15 +1,16 @@
 """MCP tool: graph_query — Knowledge Graph query and impact analysis for agents.
 
 Provides the ``graph_query`` MCP tool registered in agent allow-lists,
-enabling agents to execute Cypher queries against the tenant-scoped
-Knowledge Graph and perform impact analysis traversals.
+enabling agents to execute SQL queries against the tenant-scoped
+Knowledge Graph (PostgreSQL adjacency tables) and perform impact analysis
+traversals.
 
 Tool name for allow-list registration: ``graph_query``
 
 Functions
 ---------
 graph_query(query, tenant_id, depth)
-    Execute a Cypher query scoped to the tenant's graph namespace.
+    Execute a SQL query scoped to the tenant's graph namespace.
 impact_analysis(entity_id, tenant_id, depth)
     Traverse affected entities downstream from a given entity.
 
@@ -33,8 +34,8 @@ TOOL_NAME: str = "graph_query"
 """The canonical tool name used in agent MCP allow-lists (Req 12.6, 9.5)."""
 
 TOOL_DESCRIPTION: str = (
-    "Execute Cypher queries against the Knowledge Graph and perform "
-    "impact analysis on code entities within the tenant's scope."
+    "Execute SQL queries against the Knowledge Graph (PostgreSQL adjacency tables) "
+    "and perform impact analysis on code entities within the tenant's scope."
 )
 
 # ---------------------------------------------------------------------------
@@ -79,23 +80,20 @@ async def graph_query(
     tenant_id: str,
     depth: int = 3,
 ) -> list[dict[str, Any]]:
-    """Execute a Cypher query scoped to the tenant's graph namespace (Req 12.6).
+    """Execute a SQL query scoped to the tenant's graph namespace (Req 12.6).
 
     Delegates to :meth:`KnowledgeGraphClient.query` after injecting a
-    tenant-scope constraint. The ``depth`` parameter is passed as a Cypher
-    query parameter available to the caller's query as ``$depth``.
+    tenant-scope constraint. The ``depth`` parameter is passed as a query
+    parameter available to the caller's query.
 
     Parameters
     ----------
     query:
-        A Cypher query string. The query is executed within the context of
-        the tenant's graph namespace.
+        A SQL query string against code_graph_nodes/code_graph_edges tables.
     tenant_id:
-        The tenant identifier used to scope the query. Passed as the
-        ``$tenant_id`` parameter to the Cypher execution context.
+        The tenant identifier used to scope the query.
     depth:
         Maximum traversal depth for path-based queries (default 3).
-        Available as ``$depth`` in the Cypher query.
 
     Returns
     -------
@@ -116,7 +114,7 @@ async def graph_query(
         query,
     )
 
-    results = await client.query(cypher=query, params=params)
+    results = await client.query(sql=query, params=params)
 
     logger.info(
         "graph_query completed: tenant=%s result_count=%d",

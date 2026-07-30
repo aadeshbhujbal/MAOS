@@ -1,0 +1,92 @@
+version: "3.8"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: maos-api
+    ports:
+      - "8000:8000"
+    environment:
+      ENVIRONMENT: production
+      APP_NAME: maos
+      SERVICE_NAME: api
+      LOG_LEVEL: info
+      DEBUG: "false"
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${DRAGONFLY_URL}
+      MAOS_POSTGRES_DSN: ${DATABASE_URL}
+      MAOS_DRAGONFLY_CACHE_URL: ${DRAGONFLY_URL}
+      MAOS_GRAPH_DSN: ${DATABASE_URL}
+      SECRET_KEY: ${SECRET_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: maos-worker
+    environment:
+      ENVIRONMENT: production
+      SERVICE_NAME: worker
+      LOG_LEVEL: info
+      DEBUG: "false"
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${DRAGONFLY_URL}
+      MAOS_POSTGRES_DSN: ${DATABASE_URL}
+      MAOS_DRAGONFLY_CACHE_URL: ${DRAGONFLY_URL}
+      MAOS_GRAPH_DSN: ${DATABASE_URL}
+      SECRET_KEY: ${SECRET_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      WORKER_COUNT: 4
+      WORKER_MAX_CONCURRENCY: 10
+      JOB_TIMEOUT: 300
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: maos-dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_MAOS_API_URL: ${MAOS_API_URL:-http://api:8000}
+      NEXT_PUBLIC_MAOS_WS_URL: ${MAOS_WS_URL:-ws://api:8000/ws/events}
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+networks:
+  default:
+    driver: bridge

@@ -12,6 +12,7 @@ import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+import asyncpg
 from fastapi import FastAPI
 
 from maos import __version__
@@ -20,6 +21,7 @@ from maos.api.routers.context import configure_engine, context_router
 from maos.api.routers.mcp_registry import configure_registry, mcp_registry_router
 from maos.config.settings import Settings, get_settings
 from maos.context.engine import ContextEngine
+from maos.knowledge.graph import KnowledgeGraphClient
 from maos.knowledge.retrieval import set_knowledge_store
 from maos.knowledge.store import KnowledgeStore
 from maos.mcp.registry import MCPRegistry
@@ -40,7 +42,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     instrument_fastapi(app)
 
-    # 2. Knowledge Store
+    # 2. PostgreSQL connection pool (shared across knowledge store and graph)
+    pg_pool = await asyncpg.create_pool(settings.postgres.dsn, min_size=2, max_size=10)
+    app.state.pg_pool = pg_pool
+
+    # 3. Code Graph (PostgreSQL adjacency tables)
+    graph_client = KnowledgeGraphClient(pool=pg_pool)
+    try:
+        await graph_client.create_tables()
+        logger.info("Code graph tables initialized successfully")
+    except Exception:
+        logger.warning("Code graph table creation failed — graph features will be unavailable")
+    app.state.graph_client = graph_client
+
+    # 4. Knowledge Store (pgvector-based embeddings)
     knowledge_store = KnowledgeStore(
         postgres_dsn=settings.postgres.dsn,
         embedding_dimensions=settings.knowledge.embedding_dimensions,
@@ -53,12 +68,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         set_knowledge_store(knowledge_store)
     app.state.knowledge_store = knowledge_store
 
-    # 3. MCP Registry
+    # 5. MCP Registry
     mcp_registry = MCPRegistry()
     configure_registry(mcp_registry)
     app.state.mcp_registry = mcp_registry
 
-    # 4. Context Engine
+    # 6. Context Engine
     context_engine = ContextEngine(redis_url=settings.redis.url)
     configure_engine(context_engine)
     app.state.context_engine = context_engine
@@ -69,6 +84,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Shutdown: clean up resources
     logger.info("MAOS application shutting down")
+    if pg_pool:
+        await pg_pool.close()
     shutdown_observability()
 
 

@@ -6,7 +6,7 @@ enabling agents to execute structural queries against the code graph
 code entities with file locations.
 
 Uses ``CodeGraphBuilder`` (symbol index) for local fast lookups and
-``KnowledgeGraphClient`` (Neo4j) for relationship-based structural queries.
+``KnowledgeGraphClient`` (PostgreSQL) for relationship-based structural queries.
 
 Tool name for allow-list registration: ``code_search``
 
@@ -123,7 +123,7 @@ def _get_client() -> KnowledgeGraphClient:
 
 
 # ---------------------------------------------------------------------------
-# Query-type to Cypher mapping
+# Query-type to relationship mapping
 # ---------------------------------------------------------------------------
 
 _RELATIONSHIP_QUERIES: dict[CodeSearchQueryType, tuple[RelationType, str]] = {
@@ -137,12 +137,12 @@ _RELATIONSHIP_QUERIES: dict[CodeSearchQueryType, tuple[RelationType, str]] = {
 }
 
 
-def _build_relationship_cypher(
+def _build_relationship_sql(
     rel_type: RelationType,
     direction: str,
     target_entity: str,
 ) -> tuple[str, dict[str, Any]]:
-    """Build a Cypher query for relationship-based structural search.
+    """Build a SQL query for relationship-based structural search.
 
     Parameters
     ----------
@@ -156,42 +156,34 @@ def _build_relationship_cypher(
 
     Returns
     -------
-    tuple of (cypher_query, params)
+    tuple of (sql_query, params)
     """
     rel_label = rel_type.value
 
     if direction == "incoming":
         # Find entities that have the given relationship TO the target
-        # e.g., "find all classes implementing interface X"
-        # => (source)-[:IMPLEMENTS]->(target where entity_id contains X)
-        cypher = (
-            f"MATCH (source)-[:{rel_label}]->(target) "
-            "WHERE target.entity_id CONTAINS $target_name "
-            "RETURN source.entity_id AS entity_id, "
-            "       labels(source)[0] AS node_type, "
-            "       source.file_path AS file_path, "
-            "       source.line_number AS line_number, "
-            "       source.module AS module, "
-            "       source.language AS language "
-            "LIMIT 50"
-        )
+        sql = """
+            SELECT n.entity_id, n.node_type, n.file_path,
+                   n.line_number, n.module, n.language
+            FROM kg_edges e
+            JOIN kg_nodes n ON n.entity_id = e.source_id
+            WHERE e.target_id ILIKE %(target_name)s
+              AND e.rel_type = %(rel_type)s
+            LIMIT 50
+        """
     else:
         # Find entities that the target points TO via the relationship
-        # e.g., "find all functions that X calls"
-        # => (source where entity_id contains X)-[:CALLS]->(target)
-        cypher = (
-            f"MATCH (source)-[:{rel_label}]->(target) "
-            "WHERE source.entity_id CONTAINS $target_name "
-            "RETURN target.entity_id AS entity_id, "
-            "       labels(target)[0] AS node_type, "
-            "       target.file_path AS file_path, "
-            "       target.line_number AS line_number, "
-            "       target.module AS module, "
-            "       target.language AS language "
-            "LIMIT 50"
-        )
+        sql = """
+            SELECT n.entity_id, n.node_type, n.file_path,
+                   n.line_number, n.module, n.language
+            FROM kg_edges e
+            JOIN kg_nodes n ON n.entity_id = e.target_id
+            WHERE e.source_id ILIKE %(target_name)s
+              AND e.rel_type = %(rel_type)s
+            LIMIT 50
+        """
 
-    return cypher, {"target_name": target_entity}
+    return sql, {"target_name": f"%{target_entity}%", "rel_type": rel_label}
 
 
 # ---------------------------------------------------------------------------
@@ -256,19 +248,17 @@ async def code_search(
         results = await _by_node_type(client, query, language)
     elif search_type in _RELATIONSHIP_QUERIES:
         rel_type, direction = _RELATIONSHIP_QUERIES[search_type]
-        cypher, params = _build_relationship_cypher(rel_type, direction, query)
+        sql, params = _build_relationship_sql(rel_type, direction, query)
 
         # Add optional language filter
         if language:
-            cypher = cypher.replace(
+            sql = sql.replace(
                 "LIMIT 50",
-                "AND source.language = $language LIMIT 50"
-                if direction == "incoming"
-                else "AND target.language = $language LIMIT 50",
+                "AND n.language = %(language)s LIMIT 50",
             )
             params["language"] = language
 
-        raw_results = await client.query(cypher=cypher, params=params)
+        raw_results = await client.execute(sql=sql, params=params)
         results = [
             {
                 "entity_id": r.get("entity_id", ""),
@@ -305,7 +295,7 @@ async def _symbol_lookup(
     """Look up symbols by name using the symbol index or graph query.
 
     First checks the local symbol index (CodeGraphBuilder) for fast results,
-    then falls back to a Neo4j query for broader search.
+    then falls back to a SQL ILIKE query for broader search.
     """
     # Try local symbol index first (fast path)
     if _code_graph_builder is not None:
@@ -345,28 +335,21 @@ async def _symbol_lookup(
                 ]
             return partial_matches[:50]
 
-    # Fallback: Neo4j graph query for broader structural search
-    cypher = (
-        "MATCH (e) "
-        "WHERE e.entity_id CONTAINS $query "
-    )
-    params: dict[str, Any] = {"query": query}
+    # Fallback: SQL ILIKE query on kg_nodes for broader search
+    sql = """
+        SELECT entity_id, node_type, file_path, line_number, module, language
+        FROM kg_nodes
+        WHERE entity_id ILIKE %(query)s
+    """
+    params: dict[str, Any] = {"query": f"%{query}%"}
 
     if language:
-        cypher += "AND e.language = $language "
+        sql += " AND language = %(language)s"
         params["language"] = language
 
-    cypher += (
-        "RETURN e.entity_id AS entity_id, "
-        "       labels(e)[0] AS node_type, "
-        "       e.file_path AS file_path, "
-        "       e.line_number AS line_number, "
-        "       e.module AS module, "
-        "       e.language AS language "
-        "LIMIT 50"
-    )
+    sql += " LIMIT 50"
 
-    raw_results = await client.query(cypher=cypher, params=params)
+    raw_results = await client.execute(sql=sql, params=params)
     return [
         {
             "entity_id": r.get("entity_id", ""),
@@ -387,27 +370,16 @@ async def _by_node_type(
     language: str | None = None,
 ) -> list[dict[str, Any]]:
     """Find all entities of a given node type (e.g., CONTROLLER, SERVICE)."""
-    # Use the node_type as a Neo4j label for efficient lookups
-    cypher = (
-        f"MATCH (e:{node_type}) "
-    )
-    params: dict[str, Any] = {}
+    sql = "SELECT * FROM kg_nodes WHERE node_type = %(node_type)s"
+    params: dict[str, Any] = {"node_type": node_type}
 
     if language:
-        cypher += "WHERE e.language = $language "
+        sql += " AND language = %(language)s"
         params["language"] = language
 
-    cypher += (
-        "RETURN e.entity_id AS entity_id, "
-        "       labels(e)[0] AS node_type, "
-        "       e.file_path AS file_path, "
-        "       e.line_number AS line_number, "
-        "       e.module AS module, "
-        "       e.language AS language "
-        "LIMIT 50"
-    )
+    sql += " LIMIT 50"
 
-    raw_results = await client.query(cypher=cypher, params=params)
+    raw_results = await client.execute(sql=sql, params=params)
     return [
         {
             "entity_id": r.get("entity_id", ""),

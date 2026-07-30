@@ -1,6 +1,6 @@
 """Knowledge Graph domain contracts for MAOS.
 
-This module defines the code-entity and relationship models used by the Neo4j
+This module defines the code-entity and relationship models used by the PostgreSQL-backed
 Knowledge Graph client and the Code Intelligence subsystem:
 
 - ``NodeType`` — enumeration of recognised code-graph node categories (Req 12.1).
